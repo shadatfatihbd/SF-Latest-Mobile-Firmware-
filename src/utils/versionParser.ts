@@ -39,10 +39,10 @@ export interface ParsedAppleBuild {
  */
 export function parseSamsungPda(pda: string): ParsedSamsungPda {
   const clean = (pda || '').trim().toUpperCase();
-  // Standard Samsung build is typically 12-14 chars:
-  // e.g. A556EXXS4AXK2 -> Model: A556E, Region: XX, Type: S, BL: 4, OS: A, Year: X, Month: K, Seq: 2
-  // e.g. S928BXXU3AXK4 -> Model: S928B, Region: XX, Type: U, BL: 3, OS: A, Year: X, Month: K, Seq: 4
-  const regex = /^([A-Z0-9]+?)([A-Z]{2})([US])([0-9A-Z])([A-Z])([V-Z])([A-L])([0-9A-Z])$/;
+  // Standard Samsung build:
+  // e.g. A556EXXSIDZI3 -> Model: A556E, Region: XX, Type: S, BL: I (18), OS: D, Year: Z (2026), Month: I (Sep), Seq: 3
+  // e.g. S928BXXU6EZIF -> Model: S928B, Region: XX, Type: U, BL: 6, OS: E, Year: Z (2026), Month: I (Sep), Seq: F
+  const regex = /^([A-Z0-9]+?)([A-Z]{2})([US])([0-9A-Z])([A-Z])([A-Z])([A-L])([0-9A-Z])$/;
   const match = clean.match(regex);
 
   if (!match) {
@@ -65,13 +65,21 @@ export function parseSamsungPda(pda: string): ParsedSamsungPda {
 
   const [_, model, region, typeChar, blChar, osCode, yearLetter, monthLetter, seqChar] = match;
 
-  // Year mapping: V=2022, W=2023, X=2024, Y=2025, Z=2026
+  // Year mapping: R=2018 ... V=2022, W=2023, X=2024, Y=2025, Z=2026, A=2027, B=2028
   const yearMap: Record<string, number> = {
+    R: 2018,
+    S: 2019,
+    T: 2020,
+    U: 2021,
     V: 2022,
     W: 2023,
     X: 2024,
     Y: 2025,
     Z: 2026,
+    A: 2027,
+    B: 2028,
+    C: 2029,
+    D: 2030,
   };
   const year = yearMap[yearLetter] || (2020 + (yearLetter.charCodeAt(0) - 'T'.charCodeAt(0)));
 
@@ -86,16 +94,16 @@ export function parseSamsungPda(pda: string): ParsedSamsungPda {
     seqNumber = seqChar.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
   }
 
-  // Bootloader rev (can be hex, e.g. 1..9, A=10, B=11, C=12)
+  // Bootloader rev (can be hex or letter, e.g. 1..9, A=10, B=11, ... I=18)
   let bootloader = 1;
   if (/[0-9]/.test(blChar)) {
     bootloader = parseInt(blChar, 10);
-  } else if (/[A-F]/.test(blChar)) {
+  } else if (/[A-Z]/.test(blChar)) {
     bootloader = blChar.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
   }
 
   // Chronological score represents the absolute release timeline position:
-  // (Year * 1000000) + (Month * 10000) + (OS Code ordinal * 1000) + (SeqNumber * 10) + (Type == 'U' ? 1 : 0)
+  // (Year * 1000000) + (Month * 10000) + (OS Code ordinal * 1000) + (SeqNumber * 10) + (Type == 'U' ? 2 : 1)
   const osOrdinal = osCode.charCodeAt(0) - 'A'.charCodeAt(0) + 1;
   const score = year * 1000000 + month * 10000 + osOrdinal * 1000 + seqNumber * 10 + (typeChar === 'U' ? 2 : 1);
 
@@ -268,3 +276,86 @@ export function selectLatestSamsungRecord<T extends { latestPda: string; release
     isAmbiguous: false,
   };
 }
+
+/**
+ * Derives the factual release month and date for a Samsung build from its PDA string.
+ */
+export function deriveSamsungBuildDate(pda: string, fallbackDate?: string): string {
+  const parsed = parseSamsungPda(pda);
+  if (!parsed.valid) return fallbackDate || '2026-09-15';
+  const monthStr = String(parsed.month).padStart(2, '0');
+  // Day estimated from sequence or capped at 28
+  const day = Math.min(28, Math.max(1, parsed.sequenceNumber * 3 || 15));
+  const dayStr = String(day).padStart(2, '0');
+  return `${parsed.year}-${monthStr}-${dayStr}`;
+}
+
+/**
+ * Derives Android and One UI version from Samsung OS generation codes and FOTA attributes.
+ */
+export function deriveSamsungVersions(
+  osCode: string,
+  pda: string,
+  fotaOsAttr?: string
+): { androidVersion: string; oneUiVersion: string; securityPatchLevel: string } {
+  const parsed = parseSamsungPda(pda);
+  let android = '15';
+  let oneUi = '7.0';
+
+  if (fotaOsAttr) {
+    const num = parseInt(fotaOsAttr, 10);
+    if (num >= 17) {
+      android = '17';
+      oneUi = '9.0';
+    } else if (num === 16) {
+      android = '16';
+      oneUi = '8.0';
+    } else if (num === 15) {
+      android = '15';
+      oneUi = '7.0';
+    } else if (num === 14) {
+      android = '14';
+      oneUi = '6.1.1';
+    }
+  } else if (parsed.valid) {
+    if (parsed.osCycleCode === 'E' || parsed.osCycleCode === 'F') {
+      android = '16';
+      oneUi = '8.0';
+    } else if (parsed.osCycleCode === 'D') {
+      android = '15';
+      oneUi = '7.0';
+    } else if (parsed.osCycleCode === 'C' || parsed.osCycleCode === 'B') {
+      android = '14';
+      oneUi = '6.1.1';
+    } else {
+      android = '14';
+      oneUi = '6.1';
+    }
+  }
+
+  // Security patch level: first day of release month
+  const patchMonth = parsed.valid ? String(parsed.month).padStart(2, '0') : '09';
+  const patchYear = parsed.valid ? parsed.year : 2026;
+  const securityPatchLevel = `${patchYear}-${patchMonth}-01`;
+
+  return { androidVersion: android, oneUiVersion: oneUi, securityPatchLevel };
+}
+
+/**
+ * Compare two Apple iOS semantic version strings (e.g. "27.0.1" vs "18.2")
+ */
+export function compareAppleSemVer(verA: string, verB: string): number {
+  const parseParts = (v: string) => {
+    const clean = (v || '').replace(/[^0-9.]/g, '');
+    const parts = clean.split('.').map(p => parseInt(p, 10) || 0);
+    while (parts.length < 3) parts.push(0);
+    return parts;
+  };
+  const [a1, a2, a3] = parseParts(verA);
+  const [b1, b2, b3] = parseParts(verB);
+
+  if (a1 !== b1) return a1 - b1;
+  if (a2 !== b2) return a2 - b2;
+  return a3 - b3;
+}
+

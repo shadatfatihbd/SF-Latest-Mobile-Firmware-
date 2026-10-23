@@ -139,6 +139,23 @@ npm run build
 npm start
 ```
 
+### GitHub Actions & GitHub Pages Deployment:
+This repository includes a tested, automated workflow at `.github/workflows/deploy.yml`.
+
+1. **Push your code to GitHub**:
+   ```bash
+   git remote add origin https://github.com/<your-username>/<your-repo-name>.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. **Enable GitHub Pages via Actions**:
+   - Go to your repository on GitHub.
+   - Navigate to **Settings** → **Pages** (under the "Code and automation" section).
+   - Under **Build and deployment** → **Source**, select **GitHub Actions** (do NOT use "Deploy from a branch").
+3. **Verify Deployment**:
+   - Click the **Actions** tab on GitHub to monitor the `Deploy SF Latest Mobile Firmware` workflow.
+   - Once completed, your live site URL will be displayed in the deployment step and in **Settings** → **Pages**.
+
 ### Environment Variables:
 - `GEMINI_API_KEY`: API key for real-time live grounding verification via Google Search Grounding.
 - `APP_URL`: Public base URL for sitemap and self-referential links.

@@ -14,8 +14,9 @@ import { ApplePage } from './pages/ApplePage';
 import { HistoryPage } from './pages/HistoryPage';
 import { AboutPage } from './pages/AboutPage';
 import { PrivacyPage } from './pages/PrivacyPage';
-import { FirmwareRecord, CscDirectoryEntry, HomepageUpdateWidgets } from './types/firmware';
-import { ALL_VERIFIED_FIRMWARE, getHomepageWidgetsData } from './data/authoritativeDatabase';
+import { FirmwareRecord, CscDirectoryEntry, HomepageUpdateWidgets, DeveloperDiagnostics } from './types/firmware';
+import { ALL_VERIFIED_FIRMWARE, getHomepageWidgetsData, AUTHORITATIVE_CSC_DATABASE } from './data/authoritativeDatabase';
+import { compareSamsungBuilds, compareAppleBuilds } from './utils/versionParser';
 import { Sparkles, History as HistoryIcon, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
   const [searchCsc, setSearchCsc] = useState<string>('');
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<FirmwareRecord[] | null>(null);
+  const [searchDiagnostics, setSearchDiagnostics] = useState<DeveloperDiagnostics | undefined>(undefined);
   const [matchedCscInfo, setMatchedCscInfo] = useState<CscDirectoryEntry | undefined>(undefined);
   const [isLiveVerifying, setIsLiveVerifying] = useState<boolean>(false);
   const [liveVerificationNotice, setLiveVerificationNotice] = useState<string | null>(null);
@@ -140,6 +142,7 @@ export default function App() {
       if (data.success) {
         setSearchResults(data.records);
         setMatchedCscInfo(data.matchedCsc);
+        setSearchDiagnostics(data.diagnostics);
         setSearchModel(model);
         setSearchCsc(csc);
 
@@ -154,18 +157,43 @@ export default function App() {
         }
       } else {
         setSearchResults([]);
+        setSearchDiagnostics(data.diagnostics);
       }
     } catch (err) {
-      console.error('Search fetch error:', err);
-      // Fallback to local authoritative matching
+      console.warn('API unavailable or static host mode. Using client-side verified engine:', err);
       const cleanM = model.trim().toUpperCase();
-      const local = ALL_VERIFIED_FIRMWARE.filter(
-        (f) =>
+      const cleanCsc = csc.trim().toUpperCase();
+
+      const filtered = ALL_VERIFIED_FIRMWARE.filter((f) => {
+        const matchesModel =
           f.model.toUpperCase().includes(cleanM) ||
-          ('commercialName' in f && f.commercialName.toUpperCase().includes(cleanM)) ||
-          ('modelIdentifier' in f && f.modelIdentifier.toUpperCase().includes(cleanM))
-      );
-      setSearchResults(local);
+          ('commercialName' in f && (f as any).commercialName.toUpperCase().includes(cleanM)) ||
+          ('modelIdentifier' in f && (f as any).modelIdentifier.toUpperCase().includes(cleanM));
+        if (!matchesModel) return false;
+        if (cleanCsc && f.brand === 'samsung') {
+          return (f as any).csc.toUpperCase() === cleanCsc;
+        }
+        return true;
+      });
+
+      // Sort deterministically using versionParser
+      const sorted = [...filtered].sort((a, b) => {
+        if (a.brand === 'samsung' && b.brand === 'samsung') {
+          return compareSamsungBuilds((b as any).latestPda, (a as any).latestPda);
+        } else if (a.brand === 'apple' && b.brand === 'apple') {
+          return compareAppleBuilds((b as any).buildNumber, (a as any).buildNumber, true);
+        }
+        return new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
+      });
+
+      setSearchResults(sorted);
+      setSearchModel(model);
+      setSearchCsc(csc);
+
+      if (cleanCsc) {
+        const cscMatch = AUTHORITATIVE_CSC_DATABASE.find((c) => c.csc.toUpperCase() === cleanCsc);
+        setMatchedCscInfo(cscMatch);
+      }
     } finally {
       setIsSearching(false);
     }
@@ -336,6 +364,7 @@ export default function App() {
                 queryModel={searchModel}
                 queryCsc={searchCsc}
                 matchedCsc={matchedCscInfo}
+                diagnostics={searchDiagnostics}
                 onLiveVerify={triggerLiveVerification}
                 isLiveVerifying={isLiveVerifying}
                 onOpenCompare={handleOpenCompare}

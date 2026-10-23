@@ -48,13 +48,13 @@ app.get('/api/firmware/bulletin', (_req, res) => {
 });
 
 // API: Search Firmware with Latest-Build selection
-app.get('/api/firmware/search', (req, res) => {
+app.get('/api/firmware/search', async (req, res) => {
   try {
     const model = (req.query.model as string) || '';
     const csc = (req.query.csc as string) || '';
     const brand = (req.query.brand as 'samsung' | 'apple') || undefined;
 
-    const result = firmwareService.searchCatalog({ model, csc, brand });
+    const result = await firmwareService.searchCatalog({ model, csc, brand });
     res.json({
       success: true,
       query: { model, csc, brand },
@@ -66,6 +66,7 @@ app.get('/api/firmware/search', (req, res) => {
       availableCscsForModel: result.availableCscsForModel,
       isCscRequiredForSamsung: result.isCscRequiredForSamsung,
       verificationTimestamp: result.verificationTimestamp,
+      diagnostics: result.diagnostics,
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
@@ -74,17 +75,18 @@ app.get('/api/firmware/search', (req, res) => {
 });
 
 // API: Device details by model
-app.get('/api/firmware/device/:model', (req, res) => {
+app.get('/api/firmware/device/:model', async (req, res) => {
   try {
     const rawModel = req.params.model;
     const csc = (req.query.csc as string) || '';
-    const result = firmwareService.searchCatalog({ model: rawModel, csc });
+    const result = await firmwareService.searchCatalog({ model: rawModel, csc });
 
     if (result.records.length === 0) {
       res.status(404).json({
         success: false,
         statusLabel: 'Latest build could not be verified',
-        message: `Device model ${rawModel} not found in verified database.`
+        message: `Device model ${rawModel} not found in verified database.`,
+        diagnostics: result.diagnostics
       });
       return;
     }
@@ -96,7 +98,8 @@ app.get('/api/firmware/device/:model', (req, res) => {
       statusLabel: result.statusLabel,
       availableCscs: result.availableCscsForModel || [],
       matchedCsc: result.matchedCsc,
-      verificationTimestamp: result.verificationTimestamp
+      verificationTimestamp: result.verificationTimestamp,
+      diagnostics: result.diagnostics
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

@@ -198,3 +198,19 @@ export interface HomepageUpdateWidgets {
     verifiedAt: string;
   };
 }
+
+export interface DeveloperDiagnostics {
+  requestedModel: string;
+  requestedCsc?: string;
+  selectedProvider: string;
+  httpStatus: number | string;
+  returnedRecordsCount: number;
+  cacheState: 'HIT' | 'MISS' | 'EXPIRED' | 'LIVE_DIRECT';
+  latestCandidateBuild: string;
+  selectedBuild: string;
+  rejectionReason?: string;
+  providerFetchedAt: string;
+  verificationTimestamp: string;
+  executionTimeMs?: number;
+}
+

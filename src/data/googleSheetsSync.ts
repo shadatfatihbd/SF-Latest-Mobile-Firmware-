@@ -1,201 +1,242 @@
 /**
- * SF Latest Firmware - Google Sheets Schema & Google Apps Script Sync
+ * SF Latest Mobile Firmware - Google Sheets Schema & Google Apps Script Sync
  *
- * This file specifies the relational Google Sheets schema and standalone Google Apps Script
- * script to synchronize verified firmware releases automatically across 4 dedicated sheets:
- * 1. Samsung_Firmware
- * 2. Samsung_Security_Bulletins
- * 3. Apple_iOS_Releases
- * 4. Source_Verification_Metadata
+ * Implements the normalized 8-sheet relational architecture:
+ * 1. Devices
+ * 2. CSC_Catalog
+ * 3. Firmware_Releases
+ * 4. Test_Firmware
+ * 5. Apple_Releases
+ * 6. Update_Announcements
+ * 7. Source_Status
+ * 8. Sync_Logs
  */
 
 export const GOOGLE_SHEETS_SCHEMA = {
-  sheetName: 'SF_Latest_Firmware_Sync',
+  sheetName: 'SF_Latest_Firmware_Database',
+  version: '3.0.0',
+  description: 'Relational Google Sheets storage schema for SF Latest Mobile Firmware live sync.',
   tabs: [
     {
-      name: 'Samsung_Firmware',
+      name: 'Devices',
+      description: 'Maintained hardware catalogue of Samsung Galaxy devices and Apple iPhones.',
       columns: [
-        { header: 'Device Model', key: 'model', type: 'string', example: 'SM-A556E' },
-        { header: 'Commercial Name', key: 'commercialName', type: 'string', example: 'Samsung Galaxy A55 5G' },
+        { header: 'Device ID', key: 'id', type: 'string', example: 'sam-a55' },
+        { header: 'Manufacturer', key: 'brand', type: 'string', example: 'Samsung' },
+        { header: 'Commercial Name', key: 'commercialName', type: 'string', example: 'Galaxy A55 5G' },
+        { header: 'Model Number', key: 'model', type: 'string', example: 'SM-A556E' },
+        { header: 'Device Family', key: 'deviceFamily', type: 'string', example: 'Galaxy A' },
+        { header: 'Release Year', key: 'releaseYear', type: 'number', example: 2024 },
+        { header: 'Supported OS Range', key: 'supportedOsRange', type: 'string', example: 'Android 14 -> 17' },
+        { header: 'Primary CSC / Identifier', key: 'primaryIdentifier', type: 'string', example: 'XME' },
+        { header: 'Last Verified', key: 'lastVerifiedAt', type: 'string', example: '2026-10-23T01:30:00Z' },
+      ],
+    },
+    {
+      name: 'CSC_Catalog',
+      description: 'Worldwide Samsung sales codes, carrier mappings, and multi-CSC bundles.',
+      columns: [
         { header: 'CSC Code', key: 'csc', type: 'string', example: 'XME' },
-        { header: 'Region / Market', key: 'cscRegion', type: 'string', example: 'Malaysia' },
-        { header: 'Multi-CSC Group', key: 'multiCscGroup', type: 'string', example: 'OXM' },
-        { header: 'Latest PDA', key: 'latestPda', type: 'string', example: 'A556EXXS4AXK2' },
-        { header: 'AP Build', key: 'apBuild', type: 'string', example: 'A556EXXS4AXK2' },
-        { header: 'CP / Modem', key: 'cpBuild', type: 'string', example: 'A556EXXS4AXK1' },
-        { header: 'CSC Build', key: 'cscBuild', type: 'string', example: 'A556EOXM4AXK2' },
+        { header: 'Country / Market', key: 'country', type: 'string', example: 'Malaysia' },
+        { header: 'Region', key: 'region', type: 'string', example: 'Southeast Asia' },
+        { header: 'Multi-CSC Group', key: 'multiCscGroup', type: 'string', example: 'OLM' },
+        { header: 'Carrier Designation', key: 'carrier', type: 'string', example: 'Open Market / Unlocked' },
+        { header: 'Sample Compatible Models', key: 'compatibleModels', type: 'string', example: 'SM-A556E, SM-S928B' },
+        { header: 'Verification Date', key: 'verifiedDate', type: 'string', example: '2026-10-23' },
+      ],
+    },
+    {
+      name: 'Firmware_Releases',
+      description: 'Verified stable public firmware releases with exact PDA, AP, CP, and security patch levels.',
+      columns: [
+        { header: 'Record ID', key: 'id', type: 'string', example: 'samsung-sm-a556e-xme' },
+        { header: 'Device Model', key: 'model', type: 'string', example: 'SM-A556E' },
+        { header: 'CSC Code', key: 'csc', type: 'string', example: 'XME' },
+        { header: 'PDA / AP Build', key: 'latestPda', type: 'string', example: 'A556EXXS4AXK2' },
+        { header: 'CP / Baseband', key: 'cpBuild', type: 'string', example: 'A556EXXS4AXK1' },
+        { header: 'CSC Package Build', key: 'cscBuild', type: 'string', example: 'A556EOXM4AXK2' },
         { header: 'Android Version', key: 'androidVersion', type: 'string', example: '14' },
         { header: 'One UI Version', key: 'oneUiVersion', type: 'string', example: '6.1' },
         { header: 'Security Patch Level', key: 'securityPatchLevel', type: 'string', example: '2026-10-01' },
-        { header: 'Security Schedule', key: 'securitySchedule', type: 'string', example: 'Monthly' },
+        { header: 'Bootloader Revision', key: 'bootloaderRevision', type: 'number', example: 4 },
         { header: 'Release Date', key: 'releaseDate', type: 'string', example: '2026-10-18' },
-        { header: 'Bootloader Rev', key: 'bootloaderRevision', type: 'number', example: 4 },
-        { header: 'Rollout Status', key: 'rolloutStatus', type: 'string', example: 'rolling_out' },
-        { header: 'Verification Label', key: 'statusLabel', type: 'string', example: 'Verified Latest' },
+        { header: 'Classification', key: 'classification', type: 'string', example: 'Official / Released' },
+        { header: 'Freshness Status', key: 'freshnessStatus', type: 'string', example: 'LIVE' },
+        { header: 'Source Name', key: 'sourceName', type: 'string', example: 'Samsung Official FOTA Gateway' },
         { header: 'Official Source URL', key: 'officialSourceUrl', type: 'string', example: 'https://doc.samsungmobile.com/SM-A556E/XME/doc.html' },
-        { header: 'Verified Timestamp', key: 'verifiedAt', type: 'string', example: '2026-10-22T19:30:00Z' }
-      ]
+        { header: 'Last Checked', key: 'lastCheckedAt', type: 'string', example: '2026-10-23T01:30:00Z' },
+        { header: 'Last Successful Update', key: 'lastSuccessfulUpdateAt', type: 'string', example: '2026-10-23T01:30:00Z' },
+      ],
     },
     {
-      name: 'Samsung_Security_Bulletins',
+      name: 'Test_Firmware',
+      description: 'Candidate test builds detected on official test servers prior to public deployment.',
       columns: [
-        { header: 'Bulletin Month', key: 'monthYear', type: 'string', example: 'October 2026' },
-        { header: 'Bulletin Date', key: 'bulletinReleaseDate', type: 'string', example: '2026-10-07' },
-        { header: 'Critical CVEs', key: 'criticalCves', type: 'number', example: 2 },
-        { header: 'High CVEs', key: 'highCves', type: 'number', example: 28 },
-        { header: 'Samsung SVEs', key: 'samsungSves', type: 'number', example: 30 },
-        { header: 'Key Highlights', key: 'highlights', type: 'string', example: 'Baseband memory corruption SVE-2026-1002' },
-        { header: 'Affected Subsystems', key: 'affectedSubsystems', type: 'string', example: 'Qualcomm DSP, Exynos Modem, Knox Core' },
-        { header: 'Official Bulletin URL', key: 'bulletinUrl', type: 'string', example: 'https://security.samsungmobile.com/securityUpdate.smsb' }
-      ]
+        { header: 'Test ID', key: 'id', type: 'string', example: 'up-samsung-live-test-sm-a556e-eux' },
+        { header: 'Device Model', key: 'deviceModel', type: 'string', example: 'SM-A556E' },
+        { header: 'CSC / Region', key: 'regionOrCsc', type: 'string', example: 'EUX (Regional Test Branch)' },
+        { header: 'Candidate Hashes Count', key: 'testingHashCount', type: 'number', example: 42 },
+        { header: 'Classification', key: 'classification', type: 'string', example: 'Testing / Test Firmware' },
+        { header: 'Evidence Source', key: 'evidenceSource', type: 'string', example: 'Samsung FOTA Internal Test Server (version.test.xml)' },
+        { header: 'Evidence URL', key: 'evidenceUrl', type: 'string', example: 'https://fota-cloud-dn.ospserver.net/firmware/EUX/SM-A556E/version.test.xml' },
+        { header: 'Mandatory Disclaimer', key: 'disclaimer', type: 'string', example: 'Test firmware is not necessarily publicly released or installable. Availability and rollout may change.' },
+        { header: 'Verified Timestamp', key: 'verifiedAt', type: 'string', example: '2026-10-23T01:30:00Z' },
+      ],
     },
     {
-      name: 'Apple_iOS_Releases',
+      name: 'Apple_Releases',
+      description: 'Official signed Apple IPSW and OTA software updates for iPhone hardware.',
       columns: [
         { header: 'Device Model', key: 'model', type: 'string', example: 'iPhone 17 Pro Max' },
-        { header: 'Model Identifier', key: 'modelIdentifier', type: 'string', example: 'A3295' },
-        { header: 'Latest OS Version', key: 'latestOsVersion', type: 'string', example: '18.2' },
+        { header: 'Model Identifier / A-Code', key: 'modelIdentifier', type: 'string', example: 'A3295 (iPhone18,2)' },
+        { header: 'Latest iOS Version', key: 'latestOsVersion', type: 'string', example: '27.0.1' },
+        { header: 'Build Number', key: 'buildNumber', type: 'string', example: '24A446' },
         { header: 'Release Channel', key: 'releaseType', type: 'string', example: 'public' },
-        { header: 'Build Number', key: 'buildNumber', type: 'string', example: '22C152' },
-        { header: 'Release Date', key: 'releaseDate', type: 'string', example: '2026-10-15' },
-        { header: 'Package Size', key: 'packageSize', type: 'string', example: '2.14 GB' },
-        { header: 'Verification Label', key: 'statusLabel', type: 'string', example: 'Verified Latest' },
-        { header: 'Official Release Notes URL', key: 'officialReleaseNotesUrl', type: 'string', example: 'https://support.apple.com/en-us/HT214080' },
-        { header: 'Official Security URL', key: 'officialSecurityUrl', type: 'string', example: 'https://support.apple.com/en-us/HT201222' },
-        { header: 'Verified Timestamp', key: 'verifiedAt', type: 'string', example: '2026-10-22T22:00:00Z' }
-      ]
+        { header: 'Signed by Apple', key: 'signed', type: 'boolean', example: true },
+        { header: 'Release Date', key: 'releaseDate', type: 'string', example: '2026-09-28' },
+        { header: 'Package Size', key: 'packageSize', type: 'string', example: '11.84 GB' },
+        { header: 'Classification', key: 'classification', type: 'string', example: 'Official / Released' },
+        { header: 'Freshness Status', key: 'freshnessStatus', type: 'string', example: 'LIVE' },
+        { header: 'Security Advisory URL', key: 'officialSecurityUrl', type: 'string', example: 'https://support.apple.com/en-us/HT201222' },
+        { header: 'Last Checked', key: 'lastCheckedAt', type: 'string', example: '2026-10-23T01:30:00Z' },
+      ],
     },
     {
-      name: 'Source_Verification_Metadata',
+      name: 'Update_Announcements',
+      description: 'Officially announced upgrades, beta releases, and verified manufacturer roadmaps.',
       columns: [
-        { header: 'Source Name', key: 'sourceName', type: 'string', example: 'Samsung doc.samsungmobile.com' },
-        { header: 'Provider Adapter', key: 'adapter', type: 'string', example: 'SamsungFotaFeedAdapter' },
-        { header: 'Target Platform', key: 'platform', type: 'string', example: 'Samsung One UI / FOTA' },
-        { header: 'Cache Expiration (TTL)', key: 'ttl', type: 'string', example: '3600 seconds' },
-        { header: 'Last Refresh Status', key: 'status', type: 'string', example: 'Verified Active' },
-        { header: 'Last Successful Check', key: 'lastChecked', type: 'string', example: '2026-10-22T22:30:00Z' }
-      ]
-    }
-  ]
+        { header: 'Announcement ID', key: 'id', type: 'string', example: 'up-samsung-s24-oneui7' },
+        { header: 'Brand', key: 'brand', type: 'string', example: 'Samsung' },
+        { header: 'Device Model / Family', key: 'deviceModel', type: 'string', example: 'Galaxy S24 Series' },
+        { header: 'Expected Version', key: 'expectedVersion', type: 'string', example: 'One UI 7.0' },
+        { header: 'Expected Android / Base OS', key: 'expectedAndroidVersion', type: 'string', example: 'Android 15' },
+        { header: 'Expected Release Window', key: 'expectedReleaseWindow', type: 'string', example: 'Q4 2026' },
+        { header: 'Category', key: 'category', type: 'string', example: 'announcement' },
+        { header: 'Evidence Source', key: 'evidenceSource', type: 'string', example: 'Samsung Developer Conference (SDC 2026)' },
+        { header: 'Verified Timestamp', key: 'verifiedAt', type: 'string', example: '2026-10-23T01:30:00Z' },
+      ],
+    },
+    {
+      name: 'Source_Status',
+      description: 'Health, latency, failure count, and connectivity status for all configured providers.',
+      columns: [
+        { header: 'Provider ID', key: 'providerId', type: 'string', example: 'samsung_fota' },
+        { header: 'Provider Name', key: 'name', type: 'string', example: 'Samsung FOTA Live Gateway' },
+        { header: 'Endpoint', key: 'endpoint', type: 'string', example: 'fota-cloud-dn.ospserver.net' },
+        { header: 'Enabled', key: 'isEnabled', type: 'boolean', example: true },
+        { header: 'Available', key: 'isAvailable', type: 'boolean', example: true },
+        { header: 'HTTP Status', key: 'httpStatus', type: 'string', example: '200 OK' },
+        { header: 'Latency (ms)', key: 'latencyMs', type: 'number', example: 120 },
+        { header: 'Cache TTL (min)', key: 'cacheTtlMinutes', type: 'number', example: 30 },
+        { header: 'Last Checked', key: 'lastChecked', type: 'string', example: '2026-10-23T01:30:00Z' },
+        { header: 'Last Successful Sync', key: 'lastSuccessfulSync', type: 'string', example: '2026-10-23T01:30:00Z' },
+      ],
+    },
+    {
+      name: 'Sync_Logs',
+      description: 'Operational audit trail of all synchronization events, items synced, and error reports.',
+      columns: [
+        { header: 'Log ID', key: 'id', type: 'string', example: 'log-1729647000' },
+        { header: 'Timestamp', key: 'timestamp', type: 'string', example: '2026-10-23T01:30:00Z' },
+        { header: 'Action', key: 'action', type: 'string', example: 'AUTOMATED_SYNC' },
+        { header: 'Target Entity', key: 'entity', type: 'string', example: 'ALL_TABS' },
+        { header: 'Status', key: 'status', type: 'string', example: 'SUCCESS' },
+        { header: 'Items Synced', key: 'itemsSynced', type: 'number', example: 142 },
+        { header: 'Execution Duration (ms)', key: 'durationMs', type: 'number', example: 840 },
+        { header: 'Error Details', key: 'errorMessage', type: 'string', example: '' },
+      ],
+    },
+  ],
 };
 
 export const SAMPLE_GOOGLE_APPS_SCRIPT = `/**
- * SF Latest Firmware - Google Apps Script Automator (Multi-Sheet Sync)
+ * SF Latest Mobile Firmware - Google Apps Script Automator (8-Sheet Relational Sync)
  *
  * Setup:
  * 1. Open Google Sheets > Extensions > Apps Script.
  * 2. Replace Code.gs with this script.
- * 3. Run 'setupSheets()' once to build headers.
- * 4. Run 'syncFirmwareFromSfPlatform()' or set a Time-driven trigger (hourly/daily).
+ * 3. Run 'setupAllSheets()' once to build headers.
+ * 4. Run 'syncFirmwareDatabase()' or configure a Time-driven trigger (hourly/daily).
  */
 
 const BASE_API = 'https://ais-dev-s6se33bs5rsr5d7o5quhl2-916472862963.asia-east1.run.app';
 
-function setupSheets() {
+function setupAllSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  // 1. Samsung Firmware Tab
-  let samsungSheet = ss.getSheetByName('Samsung_Firmware');
-  if (!samsungSheet) samsungSheet = ss.insertSheet('Samsung_Firmware');
-  samsungSheet.clear();
-  samsungSheet.appendRow([
-    'Device Model', 'Commercial Name', 'CSC Code', 'Region / Market', 'Multi-CSC Group',
-    'Latest PDA', 'AP Build', 'CP / Modem', 'CSC Build', 'Android Version',
-    'One UI Version', 'Security Patch Level', 'Security Schedule', 'Release Date',
-    'Bootloader Rev', 'Rollout Status', 'Verification Label', 'Official Source URL', 'Verified Timestamp'
-  ]);
-  samsungSheet.getRange(1, 1, 1, 19).setFontWeight('bold').setBackground('#0078d4').setFontColor('#ffffff');
+  const res = UrlFetchApp.fetch(BASE_API + '/api/sync/schema');
+  const schema = JSON.parse(res.getContentText());
 
-  // 2. Samsung Security Bulletins Tab
-  let securitySheet = ss.getSheetByName('Samsung_Security_Bulletins');
-  if (!securitySheet) securitySheet = ss.insertSheet('Samsung_Security_Bulletins');
-  securitySheet.clear();
-  securitySheet.appendRow([
-    'Bulletin Month', 'Bulletin Date', 'Critical CVEs', 'High CVEs',
-    'Samsung SVEs', 'Key Highlights', 'Affected Subsystems', 'Official Bulletin URL'
-  ]);
-  securitySheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#107c41').setFontColor('#ffffff');
+  schema.tabs.forEach(tab => {
+    let sheet = ss.getSheetByName(tab.name);
+    if (!sheet) sheet = ss.insertSheet(tab.name);
+    sheet.clear();
 
-  // 3. Apple iOS Releases Tab
-  let appleSheet = ss.getSheetByName('Apple_iOS_Releases');
-  if (!appleSheet) appleSheet = ss.insertSheet('Apple_iOS_Releases');
-  appleSheet.clear();
-  appleSheet.appendRow([
-    'Device Model', 'Model Identifier', 'Latest OS Version', 'Release Channel',
-    'Build Number', 'Release Date', 'Package Size', 'Verification Label',
-    'Official Release Notes URL', 'Official Security URL', 'Verified Timestamp'
-  ]);
-  appleSheet.getRange(1, 1, 1, 11).setFontWeight('bold').setBackground('#5c2d91').setFontColor('#ffffff');
-
-  // 4. Source Verification Metadata Tab
-  let metaSheet = ss.getSheetByName('Source_Verification_Metadata');
-  if (!metaSheet) metaSheet = ss.insertSheet('Source_Verification_Metadata');
-  metaSheet.clear();
-  metaSheet.appendRow([
-    'Source Name', 'Provider Adapter', 'Target Platform', 'Cache Expiration (TTL)',
-    'Last Refresh Status', 'Last Successful Check'
-  ]);
-  metaSheet.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#333333').setFontColor('#ffffff');
-}
-
-function syncFirmwareFromSfPlatform() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let samsungSheet = ss.getSheetByName('Samsung_Firmware');
-  let appleSheet = ss.getSheetByName('Apple_iOS_Releases');
-  let securitySheet = ss.getSheetByName('Samsung_Security_Bulletins');
-  let metaSheet = ss.getSheetByName('Source_Verification_Metadata');
-  
-  if (!samsungSheet || !appleSheet || !securitySheet || !metaSheet) {
-    setupSheets();
-    samsungSheet = ss.getSheetByName('Samsung_Firmware');
-    appleSheet = ss.getSheetByName('Apple_iOS_Releases');
-    securitySheet = ss.getSheetByName('Samsung_Security_Bulletins');
-    metaSheet = ss.getSheetByName('Source_Verification_Metadata');
-  }
-
-  // Fetch recent updates
-  const recentUrl = BASE_API + '/api/firmware/recent';
-  const response = UrlFetchApp.fetch(recentUrl, { muteHttpExceptions: true });
-  if (response.getResponseCode() !== 200) {
-    Logger.log('Failed to fetch from SF Latest Firmware: ' + response.getContentText());
-    return;
-  }
-
-  const data = JSON.parse(response.getContentText());
-  const updates = data.recentUpdates || [];
-
-  // Clear rows below header
-  if (samsungSheet.getLastRow() > 1) {
-    samsungSheet.getRange(2, 1, samsungSheet.getLastRow() - 1, 19).clearContent();
-  }
-  if (appleSheet.getLastRow() > 1) {
-    appleSheet.getRange(2, 1, appleSheet.getLastRow() - 1, 11).clearContent();
-  }
-
-  updates.forEach(item => {
-    if (item.brand === 'samsung') {
-      samsungSheet.appendRow([
-        item.model, item.commercialName, item.csc, item.cscRegion, item.multiCscGroup,
-        item.latestPda, item.apBuild, item.cpBuild, item.cscBuild, item.androidVersion,
-        item.oneUiVersion, item.securityPatchLevel, item.securitySchedule || 'Monthly',
-        item.releaseDate, item.bootloaderRevision, item.rolloutStatus, item.statusLabel || 'Verified Latest',
-        item.officialSourceUrl, item.verifiedAt
-      ]);
-    } else if (item.brand === 'apple') {
-      appleSheet.appendRow([
-        item.model, item.modelIdentifier, item.latestOsVersion, item.releaseType,
-        item.buildNumber, item.releaseDate, item.packageSize, item.statusLabel || 'Verified Latest',
-        item.officialReleaseNotesUrl, item.officialSecurityUrl, item.verifiedAt
-      ]);
-    }
+    const headers = tab.columns.map(c => c.header);
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#0284c7').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
   });
 
-  // Log metadata
-  metaSheet.appendRow([
-    'SF Latest Firmware Engine', 'FirmwareService Multi-Adapter', 'All Devices',
-    '3600s (Hourly)', 'Verified Sync Success', new Date().toISOString()
-  ]);
+  Logger.log('Successfully initialized all 8 sheets.');
+}
 
-  Logger.log('SF Firmware successfully synchronized at ' + new Date().toISOString());
+function syncFirmwareDatabase() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const startTime = new Date().getTime();
+
+  try {
+    const res = UrlFetchApp.fetch(BASE_API + '/api/sync/export');
+    const data = JSON.parse(res.getContentText());
+
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to export database payload');
+    }
+
+    // Populate each tab
+    Object.keys(data.sheets).forEach(sheetName => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (sheet && data.sheets[sheetName]?.rows) {
+        // Retain header row
+        const lastRow = sheet.getLastRow();
+        if (lastRow > 1) {
+          sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+        }
+        const rows = data.sheets[sheetName].rows;
+        if (rows.length > 0) {
+          sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+        }
+      }
+    });
+
+    // Record Sync Log
+    const logSheet = ss.getSheetByName('Sync_Logs');
+    if (logSheet) {
+      logSheet.appendRow([
+        'log-' + startTime,
+        new Date().toISOString(),
+        'SCHEDULED_SYNC',
+        'ALL_8_TABS',
+        'SUCCESS',
+        data.totalItemsSynced || 0,
+        new Date().getTime() - startTime,
+        ''
+      ]);
+    }
+  } catch (err) {
+    Logger.log('Sync Error: ' + err.message);
+    const logSheet = ss.getSheetByName('Sync_Logs');
+    if (logSheet) {
+      logSheet.appendRow([
+        'log-' + startTime,
+        new Date().toISOString(),
+        'SCHEDULED_SYNC',
+        'ALL_8_TABS',
+        'FAILED',
+        0,
+        new Date().getTime() - startTime,
+        err.message
+      ]);
+    }
+  }
 }
 `;

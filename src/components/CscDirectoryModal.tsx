@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Search, Globe2, Check, Copy } from 'lucide-react';
-import { AUTHORITATIVE_CSC_DATABASE } from '../data/authoritativeDatabase';
+import { EXTENDED_CSC_CATALOGUE } from '../data/deviceCatalogue';
 
 interface CscDirectoryModalProps {
   isOpen: boolean;
@@ -18,7 +18,7 @@ export const CscDirectoryModal: React.FC<CscDirectoryModalProps> = ({
 
   if (!isOpen) return null;
 
-  const filtered = AUTHORITATIVE_CSC_DATABASE.filter((entry) => {
+  const filtered = EXTENDED_CSC_CATALOGUE.filter((entry) => {
     const q = filterText.toLowerCase();
     return (
       entry.csc.toLowerCase().includes(q) ||

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   SamsungFirmwareRecord,
   AppleFirmwareRecord,
@@ -6,6 +6,7 @@ import {
   CscDirectoryEntry,
   VerificationStatusLabel,
   DeveloperDiagnostics,
+  UpcomingFirmwareRecord,
 } from '../types/firmware';
 import {
   Smartphone,
@@ -30,6 +31,7 @@ import {
   ChevronUp,
   Server,
   Activity,
+  Globe2,
 } from 'lucide-react';
 
 interface SearchResultsProps {
@@ -38,12 +40,17 @@ interface SearchResultsProps {
   queryCsc?: string;
   matchedCsc?: CscDirectoryEntry;
   diagnostics?: DeveloperDiagnostics;
+  isCscOnlySearch?: boolean;
+  recognizedCatalogueDevice?: any;
+  catalogueMatchNote?: string;
+  compatibleModels?: string[];
   onLiveVerify: (model: string, csc?: string) => void;
   isLiveVerifying: boolean;
   onOpenCompare?: (build1: string, build2?: string) => void;
   onSelectVariant?: (record: FirmwareRecord) => void;
   onManualRefresh?: (model: string, csc?: string) => void;
   isRefreshing?: boolean;
+  onSearchModel?: (model: string, csc?: string) => void;
 }
 
 export const SearchResults: React.FC<SearchResultsProps> = ({
@@ -52,16 +59,139 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   queryCsc,
   matchedCsc,
   diagnostics,
+  isCscOnlySearch = false,
+  recognizedCatalogueDevice,
+  catalogueMatchNote,
+  compatibleModels,
   onLiveVerify,
   isLiveVerifying,
   onOpenCompare,
   onSelectVariant,
   onManualRefresh,
   isRefreshing = false,
+  onSearchModel,
 }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+
+  // If no live FOTA records found, but device is recognized in official manufacturer catalogue
+  if ((!records || records.length === 0) && recognizedCatalogueDevice) {
+    const isSamsungCatalogue = 'deviceFamily' in recognizedCatalogueDevice;
+    const dev = recognizedCatalogueDevice;
+
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8 text-left space-y-6">
+        <div className="fluent-acrylic rounded-2xl p-6 sm:p-8 border border-white/60 dark:border-white/10 shadow-xl space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-200/50 dark:border-white/10 pb-6">
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span>Device Recognized in Verified Device Catalogue</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+                {isSamsungCatalogue ? dev.commercialName : dev.marketingName}
+              </h2>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>Model: <strong className="font-mono text-slate-800 dark:text-slate-200">{isSamsungCatalogue ? dev.model : dev.hardwareIdentifiers?.[0]}</strong></span>
+                <span aria-hidden="true">·</span>
+                <span>Family: {isSamsungCatalogue ? dev.deviceFamily : dev.generation}</span>
+                <span aria-hidden="true">·</span>
+                <span>Release Year: {dev.releaseYear}</span>
+                {isSamsungCatalogue && dev.multiCscGroup && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>Multi-CSC Group: {dev.multiCscGroup}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="p-2 px-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-medium shrink-0">
+              Live FOTA Branch Inactive
+            </div>
+          </div>
+
+          {/* Explanation note */}
+          <div className="p-4 rounded-xl bg-slate-100/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 space-y-2">
+            <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <span>Official Catalogue Status</span>
+            </div>
+            <p className="leading-relaxed">
+              {catalogueMatchNote || `This device (${isSamsungCatalogue ? dev.commercialName : dev.marketingName}) is verified in the official device database. However, active public FOTA distribution is currently not deployed or has been retired by the manufacturer for this specific model variant.`}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              In accordance with data accuracy standards, SF Firmware does not invent fake version numbers or substitute incompatible firmware from different models.
+            </p>
+          </div>
+
+          {/* Compatible CSCs or Variants */}
+          {isSamsungCatalogue && dev.commonCscs && dev.commonCscs.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                Known Compatible CSC Codes for this Family:
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {dev.commonCscs.map((cscCode: string) => (
+                  <button
+                    key={cscCode}
+                    type="button"
+                    onClick={() => onSearchModel && onSearchModel(dev.model, cscCode)}
+                    className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                  >
+                    <span>{cscCode}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="pt-2 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => onLiveVerify(queryModel, queryCsc)}
+              disabled={isLiveVerifying}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-xl transition-colors disabled:opacity-50 shadow-sm"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{isLiveVerifying ? 'Checking Newsroom Feeds...' : 'Run Live Search Grounding'}</span>
+            </button>
+            <a
+              href="https://doc.samsungmobile.com/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-white/70 dark:bg-slate-800/70 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-colors border border-slate-200 dark:border-slate-700"
+            >
+              <span>Samsung Docs Portal</span>
+              <ExternalLink className="w-3 h-3 text-slate-400" />
+            </a>
+            {diagnostics && (
+              <button
+                type="button"
+                onClick={() => setShowDiagnostics(!showDiagnostics)}
+                className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 ml-auto flex items-center gap-1"
+              >
+                <span>{showDiagnostics ? 'Hide Diagnostics' : 'View Diagnostics'}</span>
+                {showDiagnostics ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+            )}
+          </div>
+
+          {showDiagnostics && diagnostics && (
+            <div className="p-3.5 rounded-xl bg-slate-900 text-slate-200 font-mono text-xs space-y-1">
+              <div>Requested Model: {diagnostics.requestedModel}</div>
+              <div>Provider: {diagnostics.selectedProvider}</div>
+              <div>Status: {diagnostics.httpStatus}</div>
+              {diagnostics.rejectionReason && (
+                <div className="text-amber-400 text-[11px] pt-1">{diagnostics.rejectionReason}</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!records || records.length === 0) {
     return (
@@ -124,6 +254,50 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   const isSamsung = current.brand === 'samsung';
   const samsung = isSamsung ? (current as SamsungFirmwareRecord) : null;
   const apple = !isSamsung ? (current as AppleFirmwareRecord) : null;
+
+  const [deviceUpcoming, setDeviceUpcoming] = useState<{
+    hasEvidence: boolean;
+    record?: UpcomingFirmwareRecord;
+    notice?: string;
+    loading: boolean;
+  }>({ hasEvidence: false, loading: true });
+
+  useEffect(() => {
+    if (current?.model) {
+      let isMounted = true;
+      setDeviceUpcoming((prev) => ({ ...prev, loading: true }));
+      const cscParam = isSamsung && samsung?.csc ? `&csc=${encodeURIComponent(samsung.csc)}` : '';
+      fetch(`/api/firmware/upcoming?model=${encodeURIComponent(current.model)}${cscParam}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (!isMounted) return;
+          if (data.success && data.records && data.records.length > 0) {
+            setDeviceUpcoming({
+              hasEvidence: true,
+              record: data.records[0],
+              loading: false,
+            });
+          } else {
+            setDeviceUpcoming({
+              hasEvidence: false,
+              notice: 'No verified upcoming firmware announcement is currently available.',
+              loading: false,
+            });
+          }
+        })
+        .catch(() => {
+          if (!isMounted) return;
+          setDeviceUpcoming({
+            hasEvidence: false,
+            notice: 'No verified upcoming firmware announcement is currently available.',
+            loading: false,
+          });
+        });
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [current?.model, isSamsung, samsung?.csc]);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -216,6 +390,63 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* CSC Market Profile Banner (if CSC-only search or matched CSC exists) */}
+      {(isCscOnlySearch || matchedCsc) && (
+        <div className="fluent-acrylic rounded-2xl p-5 border border-sky-500/30 bg-sky-500/5 shadow-md space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-sky-500/10 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                <Globe2 className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider">
+                  Samsung CSC Sales Code Profile
+                </div>
+                <div className="text-sm font-bold text-slate-900 dark:text-white">
+                  {matchedCsc?.csc || queryCsc} — {matchedCsc?.country || 'Open Market'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span>Region: <strong>{matchedCsc?.region || 'Global'}</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Package: <strong>{matchedCsc?.multiCscGroup || 'OXM'}</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Channel: <strong>{matchedCsc?.carrier || 'Open Market'}</strong></span>
+            </div>
+          </div>
+
+          {/* Sample Compatible Models */}
+          {(compatibleModels || matchedCsc?.sampleCompatibleModels) && (
+            <div className="space-y-1.5 pt-1">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <span>Compatible Galaxy Devices on {matchedCsc?.csc || queryCsc}:</span>
+                <span className="text-[11px] font-normal text-slate-400">Click any model to inspect firmware</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(compatibleModels || matchedCsc?.sampleCompatibleModels || []).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onSearchModel && onSearchModel(m, matchedCsc?.csc || queryCsc)}
+                    className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-800/80 hover:bg-sky-100 dark:hover:bg-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 border border-slate-200 dark:border-slate-700 transition-colors"
+                  >
+                    <span>{m}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isCscOnlySearch && (
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Displaying verified firmware build reference for sales code <strong>{matchedCsc?.csc || queryCsc}</strong> below.
+            </div>
+          )}
         </div>
       )}
 
@@ -677,6 +908,80 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>
+      </div>
+
+      {/* CARD 8: Upcoming Firmware & Future Roadmap */}
+      <div className="fluent-acrylic rounded-2xl p-6 border border-white/50 dark:border-white/10 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-200/40 dark:border-white/10">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-sky-500" />
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              8. Upcoming Firmware & Future Roadmap
+            </h3>
+            {deviceUpcoming.hasEvidence && deviceUpcoming.record && (
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                {deviceUpcoming.record.status}
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {deviceUpcoming.loading ? 'Verifying...' : 'Evidence-Based Intelligence'}
+          </span>
+        </div>
+
+        {deviceUpcoming.loading ? (
+          <div className="py-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-500" />
+            <span>Checking upcoming roadmap and test servers for {isSamsung ? samsung?.commercialName : apple?.model}...</span>
+          </div>
+        ) : deviceUpcoming.hasEvidence && deviceUpcoming.record ? (
+          <div className="space-y-3 text-xs">
+            <div className="p-4 rounded-xl bg-sky-500/5 border border-sky-500/15 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-bold text-slate-900 dark:text-white">
+                  Expected Version: {deviceUpcoming.record.expectedVersion}
+                </span>
+                <span className="text-slate-500 tabular-nums">
+                  Release Window: <strong>{deviceUpcoming.record.expectedReleaseWindow || 'Release date not announced.'}</strong>
+                </span>
+              </div>
+
+              {deviceUpcoming.record.expectedBuild && (
+                <div>
+                  Candidate Build: <span className="font-mono font-bold text-sky-600 dark:text-sky-400">{deviceUpcoming.record.expectedBuild}</span>
+                </div>
+              )}
+
+              {deviceUpcoming.record.testingHashCount !== undefined && (
+                <div className="text-amber-600 dark:text-amber-400 font-medium">
+                  Verified Internal Test Builds: {deviceUpcoming.record.testingHashCount} candidate hashes recorded on manufacturer test CDN.
+                </div>
+              )}
+
+              <div className="text-slate-600 dark:text-slate-400 pt-1 text-[11px] leading-relaxed">
+                {deviceUpcoming.record.notes || 'Manufacturer roadmap tracking active.'}
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-500 pt-1">
+              <span>
+                Evidence Source: <strong>{deviceUpcoming.record.evidenceSource}</strong> (Published: {deviceUpcoming.record.evidenceDate})
+              </span>
+              <span className="tabular-nums text-slate-400">
+                Verified: {deviceUpcoming.record.verifiedAt.split('T')[0]}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200/50 dark:border-white/5 text-center space-y-1.5">
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              No verified upcoming firmware announcement is currently available.
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+              No official manufacturer roadmaps, beta programs, or active test server builds are confirmed for {isSamsung ? samsung?.commercialName : apple?.model} ({current.model}).
+            </p>
+          </div>
+        )}
       </div>
 
       {/* DEVELOPER DIAGNOSTICS & TRACE (Requirement 8) */}

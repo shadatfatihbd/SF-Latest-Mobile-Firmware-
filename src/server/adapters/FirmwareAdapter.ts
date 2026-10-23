@@ -8,14 +8,39 @@ import {
   HomepageUpdateWidgets,
   VerificationStatusLabel,
   DeveloperDiagnostics,
+  UpcomingFirmwareRecord,
+  SecurityCalendarEntry,
+  UpdateCenterDashboardData,
+  UpcomingStatusLabel,
+  SearchCatalogResponse,
+  SamsungCatalogueEntry,
+  AppleCatalogueEntry,
+  SearchSuggestionItem,
+  ProviderHealthReport,
+  AdminMonitoringConfig,
+  DataFreshnessStatus,
+  FirmwareClassification,
 } from '../../types/firmware';
+import { ProviderManager, ProviderLogEntry } from '../providers/ProviderManager';
+import { SamsungTestFotaProvider } from '../providers/SamsungTestFotaProvider';
+import { GOOGLE_SHEETS_SCHEMA } from '../../data/googleSheetsSync';
 import {
   AUTHORITATIVE_SAMSUNG_RECORDS,
   AUTHORITATIVE_APPLE_RECORDS,
   AUTHORITATIVE_CSC_DATABASE,
   CURRENT_SAMSUNG_SECURITY_BULLETIN,
   getHomepageWidgetsData,
+  AUTHORITATIVE_UPCOMING_RECORDS,
+  AUTHORITATIVE_SECURITY_CALENDAR,
 } from '../../data/authoritativeDatabase';
+import {
+  SAMSUNG_DEVICE_CATALOGUE,
+  EXTENDED_CSC_CATALOGUE,
+  APPLE_DEVICE_CATALOGUE,
+  parseUniversalSearchQuery,
+  getSearchSuggestions,
+  CATALOGUE_METADATA,
+} from '../../data/deviceCatalogue';
 import {
   compareSamsungBuilds,
   compareAppleBuilds,
@@ -33,16 +58,7 @@ export interface FirmwareQuery {
   brand?: 'samsung' | 'apple';
 }
 
-export interface SearchCatalogResponse {
-  records: FirmwareRecord[];
-  latestVerifiedRecord: FirmwareRecord | null;
-  statusLabel: VerificationStatusLabel;
-  matchedCsc?: CscDirectoryEntry;
-  availableCscsForModel?: string[];
-  isCscRequiredForSamsung?: boolean;
-  verificationTimestamp: string;
-  diagnostics: DeveloperDiagnostics;
-}
+export type { SearchCatalogResponse };
 
 export interface VerificationResult {
   matchedRecord: FirmwareRecord | null;
@@ -95,8 +111,10 @@ export class FirmwareService {
   private ai: GoogleGenAI | null = null;
   private verifiedSamsung: SamsungFirmwareRecord[] = [...AUTHORITATIVE_SAMSUNG_RECORDS];
   private verifiedApple: AppleFirmwareRecord[] = [...AUTHORITATIVE_APPLE_RECORDS];
-  private cscDatabase: CscDirectoryEntry[] = [...AUTHORITATIVE_CSC_DATABASE];
+  private cscDatabase: CscDirectoryEntry[] = [...EXTENDED_CSC_CATALOGUE];
   private securityBulletin: SamsungSecurityBulletin = { ...CURRENT_SAMSUNG_SECURITY_BULLETIN };
+  private upcomingRecords: UpcomingFirmwareRecord[] = [...AUTHORITATIVE_UPCOMING_RECORDS];
+  private securityCalendar: SecurityCalendarEntry[] = [...AUTHORITATIVE_SECURITY_CALENDAR];
 
   // Provider cache storage (TTL: 30 minutes)
   private cache = new Map<string, ProviderCacheEntry<any>>();
@@ -119,12 +137,178 @@ export class FirmwareService {
     return this.cscDatabase;
   }
 
+  public getSuggestions(query: string) {
+    return getSearchSuggestions(query);
+  }
+
+  public getSamsungCatalogue(family?: string): SamsungCatalogueEntry[] {
+    if (!family || family === 'all') return SAMSUNG_DEVICE_CATALOGUE;
+    const fLower = family.toLowerCase();
+    return SAMSUNG_DEVICE_CATALOGUE.filter(d => d.deviceFamily.toLowerCase().includes(fLower));
+  }
+
+  public getAppleCatalogue(): AppleCatalogueEntry[] {
+    return APPLE_DEVICE_CATALOGUE;
+  }
+
+  public getCatalogueMetadata() {
+    return CATALOGUE_METADATA;
+  }
+
   public getSecurityBulletin(): SamsungSecurityBulletin {
     return this.securityBulletin;
   }
 
   public getHomepageWidgets(): HomepageUpdateWidgets {
     return getHomepageWidgetsData();
+  }
+
+  public getSecurityCalendar(query?: { manufacturer?: string; tier?: string }): SecurityCalendarEntry[] {
+    let list = [...this.securityCalendar];
+    if (query?.manufacturer) {
+      const m = query.manufacturer.toLowerCase();
+      list = list.filter(item => item.manufacturer.toLowerCase() === m);
+    }
+    if (query?.tier) {
+      const t = query.tier.toLowerCase();
+      list = list.filter(item => item.scheduleTier.toLowerCase() === t);
+    }
+    return list;
+  }
+
+  /**
+   * Retrieves upcoming firmware records with live check support from Samsung test server and Apple Developer RSS
+   */
+  public async getUpcomingFirmware(query?: {
+    model?: string;
+    brand?: 'samsung' | 'apple';
+    category?: string;
+    csc?: string;
+  }): Promise<{
+    records: UpcomingFirmwareRecord[];
+    hasUpcomingEvidence: boolean;
+    notice?: string;
+    categorized: {
+      announced: UpcomingFirmwareRecord[];
+      betas: UpcomingFirmwareRecord[];
+      internalTesting: UpcomingFirmwareRecord[];
+      predictions: UpcomingFirmwareRecord[];
+    };
+  }> {
+    const cleanModel = (query?.model || '').trim().toUpperCase();
+    const cleanCsc = (query?.csc || '').trim().toUpperCase();
+    const brand = query?.brand;
+    const now = new Date().toISOString();
+
+    // 1. Live probe for Samsung test server if a specific Samsung model was queried
+    if (cleanModel && (cleanModel.startsWith('SM-') || brand === 'samsung')) {
+      const cscToTest = cleanCsc || 'EUX';
+      const cacheKey = `test_probe_${cleanModel}_${cscToTest}`;
+      if (!this.cache.has(cacheKey)) {
+        try {
+          const testUrl = `https://fota-cloud-dn.ospserver.net/firmware/${cscToTest}/${cleanModel}/version.test.xml`;
+          const res = await fetch(testUrl, {
+            headers: { 'User-Agent': 'Samsung Update Client / FOTA-Agent' },
+          });
+          if (res.status === 200) {
+            const xml = await res.text();
+            const upgradeMatches = [...xml.matchAll(/<value[^>]*>([^<]+)<\/value>/g)];
+            if (upgradeMatches.length > 0) {
+              const existingIdx = this.upcomingRecords.findIndex(
+                r => r.deviceModel.toUpperCase() === cleanModel && r.category === 'internal_testing'
+              );
+              const testRecord: UpcomingFirmwareRecord = {
+                id: `up-samsung-live-test-${cleanModel.toLowerCase()}-${cscToTest.toLowerCase()}`,
+                brand: 'samsung',
+                deviceModel: cleanModel,
+                commercialName: this.getCommercialName(cleanModel),
+                deviceFamily: cleanModel.startsWith('SM-S') ? 'Galaxy S Series' : cleanModel.startsWith('SM-F') ? 'Galaxy Z Series' : 'Galaxy A Series',
+                expectedVersion: 'Next OS / Maintenance Build Under Testing',
+                expectedReleaseWindow: 'Release date not announced.',
+                regionOrCsc: `${cscToTest} (Regional Test Branch)`,
+                status: 'Testing Reported',
+                category: 'internal_testing',
+                evidenceSource: 'Samsung FOTA Internal Test Server (version.test.xml)',
+                evidenceUrl: testUrl,
+                evidenceDate: now.split('T')[0],
+                verifiedAt: now,
+                testingHashCount: upgradeMatches.length,
+                rolloutScope: `Active internal testing on ${cscToTest} firmware cluster (${upgradeMatches.length} candidate hashes recorded)`,
+                notes: 'Build candidate verified in private validation channel prior to public rollout.',
+              };
+
+              if (existingIdx >= 0) {
+                this.upcomingRecords[existingIdx] = testRecord;
+              } else {
+                this.upcomingRecords.unshift(testRecord);
+              }
+            }
+          }
+          this.cache.set(cacheKey, {
+            data: true,
+            cachedAt: Date.now(),
+            ttlMs: this.DEFAULT_TTL_MS,
+            lastRefreshAttempt: Date.now(),
+            lastRefreshSuccess: true,
+            providerFetchedAt: now,
+          });
+        } catch (e) {
+          console.warn('Samsung test probe error:', e);
+        }
+      }
+    }
+
+    // 2. Filter records
+    let filtered = [...this.upcomingRecords];
+
+    if (brand) {
+      filtered = filtered.filter(r => r.brand === brand);
+    }
+
+    if (cleanModel) {
+      filtered = filtered.filter(r => {
+        const m = r.deviceModel.toUpperCase();
+        const c = r.commercialName.toUpperCase();
+        return m.includes(cleanModel) || c.includes(cleanModel) || cleanModel.includes(m);
+      });
+    }
+
+    if (query?.category) {
+      filtered = filtered.filter(r => r.category === query.category);
+    }
+
+    const hasUpcomingEvidence = filtered.length > 0;
+    const notice = hasUpcomingEvidence
+      ? undefined
+      : 'No verified upcoming firmware announcement is currently available.';
+
+    const categorized = {
+      announced: filtered.filter(r => r.category === 'announcement'),
+      betas: filtered.filter(r => r.category === 'beta'),
+      internalTesting: filtered.filter(r => r.category === 'internal_testing'),
+      predictions: filtered.filter(r => r.category === 'prediction'),
+    };
+
+    return {
+      records: filtered,
+      hasUpcomingEvidence,
+      notice,
+      categorized,
+    };
+  }
+
+  /**
+   * Retrieves unified dashboard data for "Firmware & Security Update Center"
+   */
+  public async getDashboardData(): Promise<UpdateCenterDashboardData> {
+    const upcoming = await this.getUpcomingFirmware();
+    return {
+      latestSamsungBuilds: this.verifiedSamsung.slice(0, 6),
+      latestAppleBuilds: this.verifiedApple.slice(0, 6),
+      upcomingFirmware: upcoming.records,
+      securityCalendar: this.securityCalendar,
+      lastVerifiedAt: new Date().toISOString(),
+    };
   }
 
   public getRecentUpdates(): FirmwareRecord[] {
@@ -153,17 +337,45 @@ export class FirmwareService {
    */
   public async searchCatalog(query: FirmwareQuery): Promise<SearchCatalogResponse> {
     const startTime = Date.now();
-    const cleanModel = (query.model || '').trim().toUpperCase();
-    const cleanCsc = (query.csc || '').trim().toUpperCase();
-    const now = new Date().toISOString();
+    const rawInput = (query.model || '').trim();
+    const explicitCsc = (query.csc || '').trim().toUpperCase();
+
+    // Universal smart search parsing
+    const parsedUniversal = parseUniversalSearchQuery(rawInput);
+
+    // If search is CSC-only (e.g. "XME", "Samsung + INS", "EUX")
+    if (parsedUniversal.isCscOnly && parsedUniversal.csc) {
+      const cscCode = parsedUniversal.csc.toUpperCase();
+      const cscEntry = this.cscDatabase.find(c => c.csc.toUpperCase() === cscCode);
+      const sampleModel = cscEntry?.sampleCompatibleModels?.[0] || 'SM-A556E';
+      const cscResult = await this.handleSamsungSearch(sampleModel, cscCode, startTime);
+      return {
+        ...cscResult,
+        isCscOnlySearch: true,
+        matchedCsc: cscEntry,
+        compatibleModels: cscEntry?.sampleCompatibleModels || ['SM-S928B', 'SM-A556E', 'SM-S921B'],
+        catalogueMatchNote: cscEntry
+          ? `Samsung CSC "${cscEntry.csc}" (${cscEntry.country}, ${cscEntry.region}). Multi-CSC package: ${cscEntry.multiCscGroup}. Carrier/Sales Channel: ${cscEntry.carrier}. Displaying verified flagship build reference (${sampleModel}) for this sales code.`
+          : `Samsung CSC "${cscCode}".`,
+      };
+    }
+
+    const cleanModel = (parsedUniversal.model || rawInput).trim().toUpperCase();
+    const cleanCsc = explicitCsc || (parsedUniversal.csc || '').trim().toUpperCase();
 
     // 1. Identify Apple Queries
     const isAppleQuery =
       query.brand === 'apple' ||
+      parsedUniversal.brand === 'apple' ||
       cleanModel.includes('IPHONE') ||
       cleanModel.startsWith('A3') ||
       cleanModel.startsWith('A2') ||
-      cleanModel.startsWith('IPHONE');
+      cleanModel.startsWith('A1') ||
+      APPLE_DEVICE_CATALOGUE.some(a =>
+        a.marketingName.toUpperCase().includes(cleanModel) ||
+        a.hardwareIdentifiers.some(h => h.toUpperCase() === cleanModel) ||
+        a.aModelNumbers.some(an => an.toUpperCase() === cleanModel)
+      );
 
     if (isAppleQuery) {
       return this.handleAppleSearch(cleanModel, startTime);
@@ -181,19 +393,37 @@ export class FirmwareService {
     let targetIdentifier = '';
     let commercialName = cleanModel;
     let modelCode = '';
+    let matchedAppleCatalogue: AppleCatalogueEntry | undefined;
 
-    // Match input model to identifier
-    for (const [name, info] of Object.entries(APPLE_DEVICE_MAP)) {
-      if (cleanModel === '' || cleanModel === name || name.includes(cleanModel) || cleanModel.includes(name) || info.modelCode === cleanModel || info.identifier.toUpperCase() === cleanModel) {
-        targetIdentifier = info.identifier;
-        commercialName = info.commercialName;
-        modelCode = info.modelCode;
-        break;
+    // Match against full Apple Device Catalogue first
+    matchedAppleCatalogue = APPLE_DEVICE_CATALOGUE.find(a => {
+      const norm = cleanModel.replace(/[\s-_]/g, '').toUpperCase();
+      const mNorm = a.marketingName.replace(/[\s-_]/g, '').toUpperCase();
+      if (mNorm === norm || mNorm.includes(norm) || norm.includes(mNorm)) return true;
+      if (a.hardwareIdentifiers.some(h => h.replace(/[\s-_]/g, '').toUpperCase() === norm)) return true;
+      if (a.aModelNumbers.some(an => an.replace(/[\s-_]/g, '').toUpperCase() === norm)) return true;
+      if (a.aliases.some(al => al.replace(/[\s-_]/g, '').toUpperCase() === norm || norm.includes(al.replace(/[\s-_]/g, '').toUpperCase()))) return true;
+      return false;
+    });
+
+    if (matchedAppleCatalogue) {
+      targetIdentifier = matchedAppleCatalogue.hardwareIdentifiers[0];
+      commercialName = matchedAppleCatalogue.marketingName;
+      modelCode = matchedAppleCatalogue.aModelNumbers[0] || targetIdentifier;
+    } else {
+      // Check legacy map
+      for (const [name, info] of Object.entries(APPLE_DEVICE_MAP)) {
+        if (cleanModel === '' || cleanModel === name || name.includes(cleanModel) || cleanModel.includes(name) || info.modelCode === cleanModel || info.identifier.toUpperCase() === cleanModel) {
+          targetIdentifier = info.identifier;
+          commercialName = info.commercialName;
+          modelCode = info.modelCode;
+          break;
+        }
       }
     }
 
     if (!targetIdentifier) {
-      if (cleanModel.startsWith('IPHONE')) {
+      if (cleanModel.startsWith('IPHONE') || cleanModel === '') {
         targetIdentifier = 'iPhone18,2';
         commercialName = 'iPhone 17 Pro Max';
         modelCode = 'A3295';
@@ -578,7 +808,48 @@ export class FirmwareService {
       };
     }
 
-    // Nothing found at all -> Real unverified state
+    // Check if device is recognized in Samsung Galaxy Catalogue
+    const catalogueEntry = SAMSUNG_DEVICE_CATALOGUE.find(d => {
+      const norm = cleanModel.replace(/[\s-_]/g, '').toUpperCase();
+      const mNorm = d.model.replace(/[\s-_]/g, '').toUpperCase();
+      const cNorm = d.commercialName.replace(/[\s-_]/g, '').toUpperCase();
+      if (mNorm === norm || norm.includes(mNorm) || mNorm.includes(norm)) return true;
+      if (cNorm === norm || norm.includes(cNorm) || cNorm.includes(norm)) return true;
+      if (d.modelVariants.some(v => v.replace(/[\s-_]/g, '').toUpperCase() === norm)) return true;
+      if (d.aliases.some(a => a.replace(/[\s-_]/g, '').toUpperCase() === norm || norm.includes(a.replace(/[\s-_]/g, '').toUpperCase()))) return true;
+      return false;
+    });
+
+    if (catalogueEntry) {
+      const diagnostics: DeveloperDiagnostics = {
+        requestedModel: cleanModel,
+        requestedCsc: cleanCsc,
+        selectedProvider: 'Samsung Verified Catalogue (Archived / Legacy Device)',
+        httpStatus: '200 Recognized (FOTA Inactive)',
+        returnedRecordsCount: 0,
+        cacheState: 'LIVE_DIRECT',
+        latestCandidateBuild: 'Archived',
+        selectedBuild: 'None',
+        rejectionReason: `Device model "${catalogueEntry.commercialName} (${catalogueEntry.model})" is verified in the Samsung Galaxy product catalogue (${catalogueEntry.deviceFamily}, release year ${catalogueEntry.releaseYear}). However, active live FOTA XML distribution is currently not deployed or has been retired by Samsung OTA infrastructure for this specific model/carrier.`,
+        providerFetchedAt: now,
+        verificationTimestamp: now,
+        executionTimeMs: Date.now() - startTime,
+      };
+
+      return {
+        records: [],
+        latestVerifiedRecord: null,
+        statusLabel: 'Latest build could not be verified',
+        matchedCsc: cleanCsc ? this.cscDatabase.find(c => c.csc.toUpperCase() === cleanCsc) : undefined,
+        availableCscsForModel: catalogueEntry.commonCscs,
+        recognizedCatalogueDevice: catalogueEntry,
+        catalogueMatchNote: `Device "${catalogueEntry.commercialName}" (${catalogueEntry.model}) is verified in the Samsung Galaxy catalogue (${catalogueEntry.deviceFamily}, release ${catalogueEntry.releaseYear}, ${catalogueEntry.supportedAndroidRange || 'Legacy'}). Official live FOTA distribution is not currently active for this model.`,
+        verificationTimestamp: now,
+        diagnostics,
+      };
+    }
+
+    // Nothing found at all -> Unknown model state
     const diagnostics: DeveloperDiagnostics = {
       requestedModel: cleanModel,
       requestedCsc: cleanCsc,

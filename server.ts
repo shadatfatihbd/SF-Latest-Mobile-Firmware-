@@ -33,6 +33,61 @@ app.get('/api/firmware/widgets', (_req, res) => {
   }
 });
 
+// API: Firmware & Security Update Center Dashboard (Unified 3-Section Payload)
+app.get('/api/firmware/dashboard', async (_req, res) => {
+  try {
+    const dashboardData = await firmwareService.getDashboardData();
+    res.json({
+      success: true,
+      dashboard: dashboardData,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: Upcoming Firmware Updates (Officially Announced, Betas, Internal Testing, Predictions)
+app.get('/api/firmware/upcoming', async (req, res) => {
+  try {
+    const model = (req.query.model as string) || '';
+    const brand = (req.query.brand as 'samsung' | 'apple') || undefined;
+    const category = (req.query.category as string) || undefined;
+    const csc = (req.query.csc as string) || undefined;
+
+    const data = await firmwareService.getUpcomingFirmware({ model, brand, category, csc });
+    res.json({
+      success: true,
+      records: data.records,
+      count: data.records.length,
+      hasUpcomingEvidence: data.hasUpcomingEvidence,
+      notice: data.notice,
+      categorized: data.categorized,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: Security Update Calendar (Monthly, Quarterly, Biannual Schedules & Bulletins)
+app.get('/api/firmware/security-calendar', (req, res) => {
+  try {
+    const manufacturer = (req.query.manufacturer as string) || undefined;
+    const tier = (req.query.tier as string) || undefined;
+
+    const calendar = firmwareService.getSecurityCalendar({ manufacturer, tier });
+    res.json({
+      success: true,
+      calendar,
+      count: calendar.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // API: Samsung Security Bulletin details & schedule tiers
 app.get('/api/firmware/bulletin', (_req, res) => {
   try {
@@ -67,6 +122,10 @@ app.get('/api/firmware/search', async (req, res) => {
       isCscRequiredForSamsung: result.isCscRequiredForSamsung,
       verificationTimestamp: result.verificationTimestamp,
       diagnostics: result.diagnostics,
+      isCscOnlySearch: result.isCscOnlySearch,
+      recognizedCatalogueDevice: result.recognizedCatalogueDevice,
+      catalogueMatchNote: result.catalogueMatchNote,
+      compatibleModels: result.compatibleModels,
       timestamp: new Date().toISOString()
     });
   } catch (error: any) {
@@ -164,6 +223,68 @@ app.get('/api/csc/all', (_req, res) => {
       success: true,
       count: cscList.length,
       cscDirectory: cscList
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: Universal Search Autocomplete Suggestions
+app.get('/api/catalogue/search', (req, res) => {
+  try {
+    const q = (req.query.q as string) || '';
+    const suggestions = firmwareService.getSuggestions(q);
+    res.json({
+      success: true,
+      query: q,
+      ...suggestions,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: Samsung Galaxy Catalogue
+app.get('/api/catalogue/samsung', (req, res) => {
+  try {
+    const family = (req.query.family as string) || undefined;
+    const devices = firmwareService.getSamsungCatalogue(family);
+    res.json({
+      success: true,
+      family: family || 'all',
+      count: devices.length,
+      devices,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: Apple iPhone Catalogue
+app.get('/api/catalogue/apple', (_req, res) => {
+  try {
+    const devices = firmwareService.getAppleCatalogue();
+    res.json({
+      success: true,
+      count: devices.length,
+      devices,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: Catalogue Metadata
+app.get('/api/catalogue/metadata', (_req, res) => {
+  try {
+    const metadata = firmwareService.getCatalogueMetadata();
+    res.json({
+      success: true,
+      metadata,
+      timestamp: new Date().toISOString()
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

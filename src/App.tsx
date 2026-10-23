@@ -38,6 +38,10 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<FirmwareRecord[] | null>(null);
   const [searchDiagnostics, setSearchDiagnostics] = useState<DeveloperDiagnostics | undefined>(undefined);
   const [matchedCscInfo, setMatchedCscInfo] = useState<CscDirectoryEntry | undefined>(undefined);
+  const [searchCscOnly, setSearchCscOnly] = useState<boolean>(false);
+  const [searchRecognizedDevice, setSearchRecognizedDevice] = useState<any>(null);
+  const [searchCatalogueMatchNote, setSearchCatalogueMatchNote] = useState<string | undefined>(undefined);
+  const [searchCompatibleModels, setSearchCompatibleModels] = useState<string[] | undefined>(undefined);
   const [isLiveVerifying, setIsLiveVerifying] = useState<boolean>(false);
   const [liveVerificationNotice, setLiveVerificationNotice] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -143,6 +147,10 @@ export default function App() {
         setSearchResults(data.records);
         setMatchedCscInfo(data.matchedCsc);
         setSearchDiagnostics(data.diagnostics);
+        setSearchCscOnly(!!data.isCscOnlySearch);
+        setSearchRecognizedDevice(data.recognizedCatalogueDevice || null);
+        setSearchCatalogueMatchNote(data.catalogueMatchNote);
+        setSearchCompatibleModels(data.compatibleModels);
         setSearchModel(model);
         setSearchCsc(csc);
 
@@ -158,6 +166,9 @@ export default function App() {
       } else {
         setSearchResults([]);
         setSearchDiagnostics(data.diagnostics);
+        setSearchCscOnly(false);
+        setSearchRecognizedDevice(data.recognizedCatalogueDevice || null);
+        setSearchCatalogueMatchNote(data.catalogueMatchNote);
       }
     } catch (err) {
       console.warn('API unavailable or static host mode. Using client-side verified engine:', err);
@@ -299,41 +310,14 @@ export default function App() {
       <main className="flex-1">
         {currentPath === '/' && (
           <div>
-            {/* Hero Section */}
+            {/* Hero Section with Universal Search & Autocomplete */}
             <HeroSearch
               onSearch={performSearch}
               isLoading={isSearching}
               initialModel={searchModel}
               initialCsc={searchCsc}
+              onOpenCscDirectory={() => setCscModalOpen(true)}
             />
-
-            {/* Recent Searches Bar */}
-            {recentSearches.length > 0 && (
-              <div className="max-w-4xl mx-auto px-4 sm:px-6 mb-6 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                    <HistoryIcon className="w-3.5 h-3.5" />
-                    <span>Recent Searches:</span>
-                  </span>
-                  {recentSearches.map((s, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => performSearch(s.model, s.csc || '')}
-                      className="px-2.5 py-1 rounded-lg bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 hover:border-sky-500 text-slate-700 dark:text-slate-300 font-mono"
-                    >
-                      <span>{s.model}</span>
-                      {s.csc && <span className="text-sky-600 dark:text-sky-400 ml-1">({s.csc})</span>}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={clearRecentSearches}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                >
-                  Clear History
-                </button>
-              </div>
-            )}
 
             {/* Notification or Live Verification Banner */}
             {refreshNotification && (
@@ -365,11 +349,16 @@ export default function App() {
                 queryCsc={searchCsc}
                 matchedCsc={matchedCscInfo}
                 diagnostics={searchDiagnostics}
+                isCscOnlySearch={searchCscOnly}
+                recognizedCatalogueDevice={searchRecognizedDevice}
+                catalogueMatchNote={searchCatalogueMatchNote}
+                compatibleModels={searchCompatibleModels}
                 onLiveVerify={triggerLiveVerification}
                 isLiveVerifying={isLiveVerifying}
                 onOpenCompare={handleOpenCompare}
                 onManualRefresh={() => handleManualRefresh(searchModel, searchCsc)}
                 isRefreshing={isRefreshing}
+                onSearchModel={(m, c) => performSearch(m, c || '')}
               />
             ) : (
               <>
@@ -388,6 +377,7 @@ export default function App() {
                   }}
                   onRefreshData={() => handleManualRefresh()}
                   isRefreshing={isRefreshing}
+                  onOpenSubscribe={() => setSubscribeModalOpen(true)}
                 />
 
                 {/* Platform Cards (Samsung Galaxy vs Apple iPhone) */}

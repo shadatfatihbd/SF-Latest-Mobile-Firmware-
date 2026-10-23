@@ -1,0 +1,8 @@
+{
+  "name": "SF Latest Firmware",
+  "description": "Premium firmware and software update tracking platform for Samsung Galaxy and Apple iPhone devices inspired by Microsoft Fluent Design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
